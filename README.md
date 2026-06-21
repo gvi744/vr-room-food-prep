@@ -1,4 +1,4 @@
-VR Food-Prep POC: Gaze-plus-Click Interaction Primitive
+# VR Food-Prep POC: Gaze-plus-Click Interaction Primitive
 
 A Unity proof-of-concept validating a gaze-to-target plus click-to-confirm interaction primitive, themed as a Papa's Pizzeria style burger assembly task. Built to eventually target a Meta Quest headset with an external eye tracker.
 
@@ -13,7 +13,7 @@ Click confirms the action on whatever is currently targeted.
 
 This is not dwell-based, not gaze-only, and not a carry/physics mechanic. Placement is deterministic snap-to-plate with no physics, so the interaction data isolates the gaze-plus-click primitive cleanly.
 
-Mechanic
+# Mechanic
 
 
 Three ingredients sit on a table: bottom bun, beef patty, sesame top bun.
@@ -23,7 +23,7 @@ Gaze at the trash can and click to clear the plate.
 Stack order is not validated (any combination is allowed by design).
 
 
-Architecture
+# Architecture
 
 
 Render pipeline: URP (Universal 3D), not the VR template.
@@ -43,7 +43,7 @@ Placed prefabs (BottomBun_Placed, Patty_Placed, TopBun_Placed): mesh only, no co
 Trash can: collider + Selectable with Kind set to Trash.
 
 
-Current status
+# Current status
 
 Working: full loop end to end. Gaze (mouse) selects, click confirms, plate stacks ingredients, trash clears the plate.
 
@@ -55,7 +55,7 @@ Add OpenXR + XR Origin to run on the headset.
 Wire the JEOresearch eye-tracker output (pupil ellipse in camera space, needs a calibration step) into the eye-tracker provider.
 
 
-Setup on a new machine
+# Setup on a new machine
 
 This project uses Git. Most of a Unity project regenerates locally, so only source-of-truth files are committed.
 
@@ -85,13 +85,6 @@ Pull before you start, push when you finish.
 
 bash# before editing on a machine
 git pull
-
-# after saving the scene in Unity
-git add .
-git commit -m "describe what changed"
-git push
-
-Save the scene in Unity before committing (unsaved changes are not in the files yet). Pulling while Unity is closed is safest. Sticking to push-then-pull avoids merge conflicts, which are painful for scene and prefab files even as text.
 
 What Git ignores
 
