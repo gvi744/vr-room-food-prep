@@ -11,7 +11,7 @@ public class ControllerConfirmProvider : MonoBehaviour, IConfirmProvider
 			confirmAction.Enable();
 	}
 
-	private void OnDistable()
+	private void OnDisable()
 	{
 		if (confirmAction != null)
 			confirmAction.Disable();
