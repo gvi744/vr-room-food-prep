@@ -2,8 +2,8 @@ using UnityEngine;
 
 public class GazeInteractor : MonoBehaviour
 {
-    [SerializeField] private MonoBehaviour gazeProviderObject;
-    [SerializeField] private MonoBehaviour confirmProviderObject;
+    [SerializeField] private CalibratedGazeProvider gazeProviderObject;
+    [SerializeField] private ControllerConfirmProvider confirmProviderObject;
 
     private IGazeProvider gazeProvider;
     private IConfirmProvider confirmProvider;
@@ -11,8 +11,8 @@ public class GazeInteractor : MonoBehaviour
 
     private void Start()
     {
-        gazeProvider = gazeProviderObject as IGazeProvider;
-        confirmProvider = confirmProviderObject as IConfirmProvider;
+        gazeProvider = gazeProviderObject;
+        confirmProvider = confirmProviderObject;
 
         if (gazeProvider == null)
             Debug.LogError("GazeInteractor: gazeProviderObject does not implement IGazeProvider");
@@ -27,23 +27,29 @@ public class GazeInteractor : MonoBehaviour
 
         if (gazeProvider.Raycast(out RaycastHit hit))
         {
-            Debug.Log($"Ray hit: {hit.collider.gameObject.name}");
-
             Selectable selectable = hit.collider.GetComponent<Selectable>();
 
             if (selectable != null)
             {
-                currentTarget?.HidePrompt();
-                currentTarget = selectable;
-                currentTarget.ShowPrompt();
-                Debug.Log($"Confirmed: {currentTarget.gameObject.name}");
+                if (selectable != currentTarget)   // only on gaze entering
+                {
+                    currentTarget?.HidePrompt();
+                    currentTarget = selectable;
+                    currentTarget.ShowPrompt();
+                }
 
                 if (confirmProvider.IsConfirmed())
                 {
+                    Debug.Log($"[gaze] selected: {currentTarget.gameObject.name}");
                     currentTarget.OnSelect();
                 }
-                
-            }   
+            }
+            else
+            {
+                // Gazing at a non-selectable surface (wall, bench): the old
+                // target's prompt must not stay up.
+                ClearTarget();
+            }
         }
         else
         {

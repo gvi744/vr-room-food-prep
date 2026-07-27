@@ -18,7 +18,10 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
     [SerializeField] private Camera gazeCamera;        // the XR eye camera (real projection)
     [SerializeField] private float maxDistance = 10f;
     [SerializeField] private LayerMask layerMask = ~0;
-    [SerializeField] private bool requireCalibrated = true;  // ignore RAW until a fit exists
+    [SerializeField] private bool requireCalibrated = false;  // if true, ignore RAW until a fit exists otherwise if false, then just send a ray regardless
+
+    public Vector2 ViewportPoint { get; private set; }
+    public bool hasGaze { get; private set; }
 
     private void Start()
     {
@@ -30,6 +33,7 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
     public bool Raycast(out RaycastHit hit)
     {
         hit = default;
+        hasGaze = false;
         if (bridge == null || gazeCamera == null) return false;
 
         // Before FIT the stream is RAW (uncalibrated direction, not a screen
@@ -39,6 +43,9 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
         Vector2 g = bridge.Gaze;                          // -1..1, y up
         Vector3 vp = new Vector3((g.x + 1f) * 0.5f,       // -1..1 -> 0..1 viewport
                                  (g.y + 1f) * 0.5f, 0f);
+        ViewportPoint = vp;
+        hasGaze = true;
+
         Ray ray = gazeCamera.ViewportPointToRay(vp);
         Debug.DrawRay(ray.origin, ray.direction * maxDistance, Color.cyan);
         return Physics.Raycast(ray, out hit, maxDistance, layerMask);

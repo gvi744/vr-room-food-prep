@@ -31,6 +31,23 @@ public class UnityGazeBridge : MonoBehaviour
     public Vector2 Gaze      { get { lock (gazeLock) { return gaze; } } }
     public bool    Calibrated { get { lock (gazeLock) { return calibrated; } } }
 
+    // ACK/ERR tallies per command, so CalibrationDriver can wait for the
+    // bridge's actual response instead of a blind timer. Written on the
+    // receive thread, read on the main thread.
+    private volatile int recordAcks, recordErrs, fitAcks, fitErrs;
+    private volatile int valRecordAcks, valRecordErrs, valReportAcks, valReportErrs;
+    public int RecordAcks    => recordAcks;
+    public int RecordErrs    => recordErrs;
+    public int FitAcks       => fitAcks;
+    public int FitErrs       => fitErrs;
+    public int ValRecordAcks => valRecordAcks;
+    public int ValRecordErrs => valRecordErrs;
+    public int ValReportAcks => valReportAcks;
+    public int ValReportErrs => valReportErrs;
+
+    // Last ACK,VALREPORT detail ("8 targets, accuracy 1.2deg, ..."), for UI/logs.
+    public volatile string LastValReport = "";
+
     private UdpClient rx;
     private UdpClient tx;
     private Thread rxThread;
@@ -66,11 +83,24 @@ public class UnityGazeBridge : MonoBehaviour
                         break;
                     case "ACK":
                     case "ERR":
+                        if (p.Length > 1)
+                        {
+                            bool ok = p[0] == "ACK";
+                            if (p[1] == "RECORD")    { if (ok) recordAcks++;    else recordErrs++;    }
+                            if (p[1] == "FIT")       { if (ok) fitAcks++;       else fitErrs++;       }
+                            if (p[1] == "VALRECORD") { if (ok) valRecordAcks++; else valRecordErrs++; }
+                            if (p[1] == "VALREPORT")
+                            {
+                                if (ok) { LastValReport = msg.Substring("ACK,VALREPORT,".Length); valReportAcks++; }
+                                else valReportErrs++;
+                            }
+                        }
                         Debug.Log("[bridge] " + msg);
                         break;
                 }
             }
             catch (SocketException) { /* timeout or close */ }
+            catch (ObjectDisposedException) { break; /* socket closed on shutdown */ }
             catch (FormatException)  { /* half-written packet; skip */ }
         }
     }
@@ -91,6 +121,13 @@ public class UnityGazeBridge : MonoBehaviour
     public void SendFit()    => Send("FIT");
     public void SendReset()  => Send("RESET");
 
+    // ── Validation commands (score the fit on independent targets) ──────────
+    public void SendValTarget(int index, float x, float y) =>
+        Send($"VALTARGET,{index},{x.ToString("F3", CultureInfo.InvariantCulture)}," +
+             $"{y.ToString("F3", CultureInfo.InvariantCulture)}");
+    public void SendValRecord() => Send("VALRECORD");
+    public void SendValReport() => Send("VALREPORT");
+
     void Send(string msg)
     {
         var bytes = Encoding.UTF8.GetBytes(msg);
@@ -102,5 +139,11 @@ public class UnityGazeBridge : MonoBehaviour
         running = false;
         try { rx?.Close(); } catch { }
         try { tx?.Close(); } catch { }
+    }
+
+    void Update()
+{
+    if (Time.frameCount % 60 == 0)
+        Debug.Log($"[bridge] gaze={Gaze} calibrated={Calibrated}");
     }
 }

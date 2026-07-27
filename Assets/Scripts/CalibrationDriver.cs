@@ -1,19 +1,6 @@
-// CalibrationDriver.cs — drives the in-VR 9-point calibration through the bridge.
-//
-// Sequence per INTERFACE_SPEC.md:
-//   for i in 1..9:  show dot i -> TARGET,i,x,y -> (user fixates + trigger) -> RECORD
-//   then FIT  (bridge fits, saves calibration.json, switches stream RAW -> GAZE)
-//
-// The 9 targets are identical to collect_9point.py's CALIB_TARGETS and are sent
-// as the -1..1 truth. The same -1..1 value both positions the dot (via viewport)
-// and is sent as TARGET, so the fit and the runtime ray share one convention.
-//
-// Confirm reuses your existing IConfirmProvider (right-trigger). Because that is
-// the SAME trigger GazeInteractor uses to plate, this driver disables the
-// interactor for the duration of calibration so one press only advances the dot.
-
 using System.Collections;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class CalibrationDriver : MonoBehaviour
 {
@@ -22,7 +9,7 @@ public class CalibrationDriver : MonoBehaviour
     [SerializeField] private Camera gazeCamera;
     [SerializeField] private GameObject dotMarker;    // small sphere shown at each target
     [SerializeField] private float dotDistance = 4f;  // metres in front of the camera
-    [SerializeField] private float recordWindow = 1.2f; // > bridge's ~1 s sample time
+    [SerializeField] private float recordTimeout = 6f; // > bridge's 5 s sampling deadline
 
     [Header("Scene toggles during calibration")]
     [SerializeField] private GameObject startButtonCanvas; // world-space button, hidden while running
@@ -30,10 +17,13 @@ public class CalibrationDriver : MonoBehaviour
                                                             // trigger only advances dots
 
     [Header("Editor testing")]
-    [SerializeField] private bool enableEditorKey = true;   // press C in the Editor to Begin
+    [SerializeField] private bool allowKeyboardStart = true; // press C to Begin()
 
     private IConfirmProvider confirm;
     private bool running;
+
+    [Header("Validation")]
+    [SerializeField] private bool runValidation = true; // re-check accuracy after FIT
 
     // Same order and positions as collect_9point.py CALIB_TARGETS. Normalized
     // -1..1, y up, (0,0) = centre.
@@ -50,6 +40,21 @@ public class CalibrationDriver : MonoBehaviour
         new(-0.8f,-0.8f),  // lower-left
     };
 
+    // Same as collect_9point.py VALID_TARGETS: deliberately DIFFERENT positions
+    // from the calibration set, so accuracy is measured on points the fit never
+    // saw (testing on the calibration dots would measure overfitting).
+    private static readonly Vector2[] ValTargets =
+    {
+        new(0.4f,  0.4f),
+        new(-0.4f, 0.4f),
+        new(0.4f, -0.4f),
+        new(-0.4f,-0.4f),
+        new(0f,    0.5f),
+        new(0.5f,  0f),
+        new(-0.5f, 0f),
+        new(0f,   -0.5f),
+    };
+
     private void Start()
     {
         confirm = confirmProviderObject as IConfirmProvider;
@@ -60,8 +65,9 @@ public class CalibrationDriver : MonoBehaviour
 
     private void Update()
     {
-        if (enableEditorKey && Application.isEditor && !running && Input.GetKeyDown(KeyCode.C))
-            Begin();
+        if (!allowKeyboardStart || Keyboard.current == null) return;
+        if (Keyboard.current.cKey.wasPressedThisFrame) Begin();
+        if (Keyboard.current.vKey.wasPressedThisFrame) BeginValidation();
     }
 
     // Call this from the world-space button's OnClick, or press C in the Editor.
@@ -70,16 +76,38 @@ public class CalibrationDriver : MonoBehaviour
         if (!running) StartCoroutine(RunCalibration());
     }
 
+    // Re-check accuracy of the CURRENT calibration (e.g. after starting the
+    // bridge with --load) without recalibrating. Press V, or call from a button.
+    public void BeginValidation()
+    {
+        if (!running) StartCoroutine(RunValidationOnly());
+    }
+
+    // Hide the start button and stop gameplay selection so a trigger press only
+    // advances the current dot; Restore() hands control back.
+    private void TakeOver()
+    {
+        if (startButtonCanvas != null) startButtonCanvas.SetActive(false);
+        if (gazeInteractor != null)    gazeInteractor.enabled = false;
+        if (dotMarker != null)         dotMarker.SetActive(true);
+    }
+
+    private void Restore()
+    {
+        if (dotMarker != null)         dotMarker.SetActive(false);
+        if (gazeInteractor != null)    gazeInteractor.enabled = true;
+        if (startButtonCanvas != null) startButtonCanvas.SetActive(true);
+    }
+
     private IEnumerator RunCalibration()
     {
         if (bridge == null || confirm == null) yield break;
         running = true;
+        TakeOver();
 
-        // Take over the trigger: hide the button, stop gameplay selection so one
-        // press only advances the calibration dot.
-        if (startButtonCanvas != null) startButtonCanvas.SetActive(false);
-        if (gazeInteractor != null)    gazeInteractor.enabled = false;
-        if (dotMarker != null)         dotMarker.SetActive(true);
+        // Fresh session: an earlier aborted/finished run leaves pairs in the
+        // bridge, and FIT would silently mix them into this run's fit.
+        bridge.SendReset();
 
         for (int i = 0; i < Targets.Length; i++)
         {
@@ -93,18 +121,108 @@ public class CalibrationDriver : MonoBehaviour
             // catches the one-frame WasPressedThisFrame edge.
             yield return new WaitUntil(() => confirm.IsConfirmed());
 
+            int acks = bridge.RecordAcks, errs = bridge.RecordErrs;
             bridge.SendRecord();                  // bridge samples ~1 s, IQR-reduces
-            yield return new WaitForSeconds(recordWindow);
+
+            // Advance on the bridge's actual response, not a blind timer — a
+            // slow tracker means RECORD can take up to 5 s, and moving the dot
+            // while the bridge is still sampling contaminates the pair.
+            float deadline = Time.time + recordTimeout;
+            yield return new WaitUntil(() =>
+                bridge.RecordAcks != acks || bridge.RecordErrs != errs ||
+                Time.time >= deadline);
+
+            if (bridge.RecordAcks == acks)
+            {
+                // ERR or timeout (tracker down / no gaze data): stay on this
+                // dot and let the user try again instead of feeding FIT a hole.
+                Debug.LogWarning($"[calib] target {i + 1} not recorded — " +
+                                 "check tracker/bridge, then fixate + trigger again");
+                i--;
+                continue;
+            }
         }
 
-        bridge.SendFit();   // expect ACK,FIT,... in the log; stream switches to GAZE
-        Debug.Log("[calib] done — FIT sent; provider should now receive GAZE");
+        int fAcks = bridge.FitAcks, fErrs = bridge.FitErrs;
+        bridge.SendFit();
+        float fitDeadline = Time.time + 3f;
+        yield return new WaitUntil(() =>
+            bridge.FitAcks != fAcks || bridge.FitErrs != fErrs ||
+            Time.time >= fitDeadline);
 
-        // Hand the trigger back to gameplay, restore the button.
-        if (dotMarker != null)         dotMarker.SetActive(false);
-        if (gazeInteractor != null)    gazeInteractor.enabled = true;
-        if (startButtonCanvas != null) startButtonCanvas.SetActive(true);
+        bool fitOk = bridge.FitAcks != fAcks;
+        if (fitOk)
+            Debug.Log("[calib] done — FIT acknowledged; provider now receives GAZE");
+        else
+            Debug.LogError("[calib] FIT failed or timed out — stream stays RAW; see bridge log");
+
+        // Immediately re-check accuracy on targets the fit never saw.
+        if (fitOk && runValidation)
+            yield return ValidationSequence();
+
+        Restore();
         running = false;
+    }
+
+    private IEnumerator RunValidationOnly()
+    {
+        if (bridge == null || confirm == null) yield break;
+        if (!bridge.Calibrated)
+        {
+            Debug.LogWarning("[valid] no calibrated stream — run calibration first, " +
+                             "or start the bridge with --load");
+            yield break;
+        }
+        running = true;
+        TakeOver();
+        yield return ValidationSequence();
+        Restore();
+        running = false;
+    }
+
+    // Show each validation dot, have the bridge score the calibrated stream
+    // against it, then request the summary report. Assumes TakeOver() is done.
+    private IEnumerator ValidationSequence()
+    {
+        for (int i = 0; i < ValTargets.Length; i++)
+        {
+            Vector2 t = ValTargets[i];
+            PlaceDot(t);
+            bridge.SendValTarget(i + 1, t.x, t.y);
+
+            Debug.Log($"[valid] target {i + 1}/{ValTargets.Length} at " +
+                      $"({t.x:+0.00},{t.y:+0.00}) — fixate + trigger");
+
+            yield return new WaitUntil(() => confirm.IsConfirmed());
+
+            int acks = bridge.ValRecordAcks, errs = bridge.ValRecordErrs;
+            bridge.SendValRecord();
+            float deadline = Time.time + recordTimeout;
+            yield return new WaitUntil(() =>
+                bridge.ValRecordAcks != acks || bridge.ValRecordErrs != errs ||
+                Time.time >= deadline);
+
+            if (bridge.ValRecordAcks == acks)
+            {
+                Debug.LogWarning($"[valid] target {i + 1} not recorded — " +
+                                 "check tracker/bridge, then fixate + trigger again");
+                i--;
+                continue;
+            }
+        }
+
+        int rAcks = bridge.ValReportAcks, rErrs = bridge.ValReportErrs;
+        bridge.SendValReport();
+        float reportDeadline = Time.time + 3f;
+        yield return new WaitUntil(() =>
+            bridge.ValReportAcks != rAcks || bridge.ValReportErrs != rErrs ||
+            Time.time >= reportDeadline);
+
+        if (bridge.ValReportAcks != rAcks)
+            Debug.Log("[valid] RESULT — " + bridge.LastValReport +
+                      " (saved to validation_report.json next to the bridge)");
+        else
+            Debug.LogError("[valid] no validation report received — see bridge log");
     }
 
     private void PlaceDot(Vector2 t)

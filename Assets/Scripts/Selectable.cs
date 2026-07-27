@@ -21,6 +21,11 @@ public class Selectable : MonoBehaviour
 
     public void OnSelect()
     {
+        if (plate == null)
+        {
+            Debug.LogWarning($"Selectable '{name}': plate is not assigned");
+            return;
+        }
         if (kind == SelectableKind.Ingredient)
             plate.Place(placedPrefab);
         else
