@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using TMPro;
 
 public class CalibrationDriver : MonoBehaviour
 {
@@ -10,6 +11,20 @@ public class CalibrationDriver : MonoBehaviour
     [SerializeField] private GameObject dotMarker;    // small sphere shown at each target
     [SerializeField] private float dotDistance = 4f;  // metres in front of the camera
     [SerializeField] private float recordTimeout = 6f; // > bridge's 5 s sampling deadline
+
+    [Header("Calibration square (head-locked)")]
+    // Must match calibration.py QUEST3_FOV_X_DEG / QUEST3_FOV_Y_DEG.
+    [SerializeField] private float fovXDeg = 110f;
+    [SerializeField] private float fovYDeg = 96f;
+    // Fraction of FOV the outermost dots sit at, per axis. Lower X to pull the
+    // sides into a comfortable viewing box (e.g. with an extended frame) without
+    // touching the true optical FOV the fit relies on. 0.6 = inner 60%.
+    [SerializeField, Range(0.1f, 1f)] private float boundaryFractionX = 0.6f;
+    [SerializeField, Range(0.1f, 1f)] private float boundaryFractionY = 0.6f;
+
+    // The raw target arrays reach ±0.8 at their extremes; dividing by this makes
+    // the outermost dot map to the boundary fraction of the FOV exactly.
+    private const float TargetExtent = 0.8f;
 
     [Header("Scene toggles during calibration")]
     [SerializeField] private GameObject startButtonCanvas; // world-space button, hidden while running
@@ -24,6 +39,15 @@ public class CalibrationDriver : MonoBehaviour
 
     [Header("Validation")]
     [SerializeField] private bool runValidation = true; // re-check accuracy after FIT
+
+    [Header("Progress overlay")]
+    // Optional. Assign a screen-corner TMP label to show sequence position,
+    // e.g. "1/17". Total is calibration dots + (validation dots if enabled).
+    [SerializeField] private TMP_Text progressLabel;
+
+    // Running position across the whole calib+val sequence, for progressLabel.
+    private int progressStep;
+    private int progressTotal;
 
     // Same order and positions as collect_9point.py CALIB_TARGETS. Normalized
     // -1..1, y up, (0,0) = centre.
@@ -105,6 +129,10 @@ public class CalibrationDriver : MonoBehaviour
         running = true;
         TakeOver();
 
+        // Whole sequence: 9 calibration dots, plus validation if it will run.
+        progressTotal = Targets.Length + (runValidation ? ValTargets.Length : 0);
+        SetProgress(0, progressTotal);
+
         // Fresh session: an earlier aborted/finished run leaves pairs in the
         // bridge, and FIT would silently mix them into this run's fit.
         bridge.SendReset();
@@ -113,6 +141,7 @@ public class CalibrationDriver : MonoBehaviour
         {
             Vector2 t = Targets[i];
             PlaceDot(t);
+            SetProgress(i + 1, progressTotal);
             bridge.SendTarget(i + 1, t.x, t.y);   // 1-indexed, matches the spec
 
             Debug.Log($"[calib] target {i + 1}/9 at ({t.x:+0.00},{t.y:+0.00}) — fixate + trigger");
@@ -158,7 +187,7 @@ public class CalibrationDriver : MonoBehaviour
 
         // Immediately re-check accuracy on targets the fit never saw.
         if (fitOk && runValidation)
-            yield return ValidationSequence();
+            yield return ValidationSequence(Targets.Length);
 
         Restore();
         running = false;
@@ -175,19 +204,24 @@ public class CalibrationDriver : MonoBehaviour
         }
         running = true;
         TakeOver();
-        yield return ValidationSequence();
+        progressTotal = ValTargets.Length;
+        SetProgress(0, progressTotal);
+        yield return ValidationSequence(0);
         Restore();
         running = false;
     }
 
     // Show each validation dot, have the bridge score the calibrated stream
     // against it, then request the summary report. Assumes TakeOver() is done.
-    private IEnumerator ValidationSequence()
+    // stepOffset is how many dots preceded this sequence (Targets.Length after a
+    // full calibration, 0 for validation-only), so the counter reads continuously.
+    private IEnumerator ValidationSequence(int stepOffset)
     {
         for (int i = 0; i < ValTargets.Length; i++)
         {
             Vector2 t = ValTargets[i];
             PlaceDot(t);
+            SetProgress(stepOffset + i + 1, progressTotal);
             bridge.SendValTarget(i + 1, t.x, t.y);
 
             Debug.Log($"[valid] target {i + 1}/{ValTargets.Length} at " +
@@ -225,11 +259,33 @@ public class CalibrationDriver : MonoBehaviour
             Debug.LogError("[valid] no validation report received — see bridge log");
     }
 
+    private void SetProgress(int step, int total)
+    {
+        progressStep = step;
+        progressTotal = total;
+        if (progressLabel != null) progressLabel.text = $"{step}/{total}";
+    }
+
     private void PlaceDot(Vector2 t)
     {
         if (dotMarker == null || gazeCamera == null) return;
-        // -1..1 -> 0..1 viewport, z = distance in front of the camera.
-        Vector3 vp = new((t.x + 1f) * 0.5f, (t.y + 1f) * 0.5f, dotDistance);
-        dotMarker.transform.position = gazeCamera.ViewportToWorldPoint(vp);
+
+        // Normalize so the ±0.8 extremes become ±1 "square edge", then scale by
+        // the per-axis boundary fraction to sit at that fraction of the real FOV.
+        // Same tan(FOV/2) mapping calibration.py uses, so the dot is at the exact
+        // angle the fit assumes for this (x,y) — Option A, Python untouched.
+        float nx = (t.x / TargetExtent) * boundaryFractionX;
+        float ny = (t.y / TargetExtent) * boundaryFractionY;
+
+        float tx = nx * Mathf.Tan(fovXDeg * 0.5f * Mathf.Deg2Rad);
+        float ty = ny * Mathf.Tan(fovYDeg * 0.5f * Mathf.Deg2Rad);
+
+        // Direction in the camera's local frame: forward, offset by the tangents.
+        // Head-locked because we rebuild it from the camera's current transform.
+        Vector3 dirLocal = new Vector3(tx, ty, 1f).normalized;
+        Vector3 dirWorld = gazeCamera.transform.TransformDirection(dirLocal);
+
+        dotMarker.transform.position =
+            gazeCamera.transform.position + dirWorld * dotDistance;
     }
 }
