@@ -2105,8 +2105,8 @@ MonoBehaviour:
   recordTimeout: 6
   fovXDeg: 110
   fovYDeg: 96
-  boundaryFractionX: 0.5
-  boundaryFractionY: 0.5
+  boundaryFractionX: 0.3
+  boundaryFractionY: 0.3
   startButtonCanvas: {fileID: 248833790}
   gazeInteractor: {fileID: 1419662234}
   allowKeyboardStart: 1

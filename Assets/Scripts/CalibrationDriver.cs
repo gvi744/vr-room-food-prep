@@ -37,6 +37,11 @@ public class CalibrationDriver : MonoBehaviour
     private IConfirmProvider confirm;
     private bool running;
 
+    // The dot's parent before calibration. While calibration runs we reparent
+    // dotMarker under gazeCamera so the whole target square follows the head;
+    // Restore() puts it back exactly where the scene had it.
+    private Transform dotOriginalParent;
+
     [Header("Validation")]
     [SerializeField] private bool runValidation = true; // re-check accuracy after FIT
 
@@ -113,12 +118,29 @@ public class CalibrationDriver : MonoBehaviour
     {
         if (startButtonCanvas != null) startButtonCanvas.SetActive(false);
         if (gazeInteractor != null)    gazeInteractor.enabled = false;
-        if (dotMarker != null)         dotMarker.SetActive(true);
+        if (dotMarker != null && gazeCamera != null)
+        {
+            dotMarker.SetActive(true);
+            // Remember where the dot lived, then attach it to the camera so its
+            // world pose is re-derived every frame as the head moves. PlaceDot
+            // now only sets a camera-local position; the hierarchy does the
+            // head-following, so the square stays in view no matter where the
+            // user looks. worldPositionStays:false keeps localPosition as the
+            // literal offset we write, not a value back-computed from world.
+            dotOriginalParent = dotMarker.transform.parent;
+            dotMarker.transform.SetParent(gazeCamera.transform, false);
+        }
     }
 
     private void Restore()
     {
-        if (dotMarker != null)         dotMarker.SetActive(false);
+        if (dotMarker != null)
+        {
+            // Detach from the camera and hand the dot back to its original
+            // parent, so nothing stays stuck to the head after calibration.
+            dotMarker.transform.SetParent(dotOriginalParent, false);
+            dotMarker.SetActive(false);
+        }
         if (gazeInteractor != null)    gazeInteractor.enabled = true;
         if (startButtonCanvas != null) startButtonCanvas.SetActive(true);
     }
@@ -281,11 +303,12 @@ public class CalibrationDriver : MonoBehaviour
         float ty = ny * Mathf.Tan(fovYDeg * 0.5f * Mathf.Deg2Rad);
 
         // Direction in the camera's local frame: forward, offset by the tangents.
-        // Head-locked because we rebuild it from the camera's current transform.
+        // The dot is parented to the camera (see TakeOver), so a local position
+        // is all we set — Unity re-derives the world pose each frame as the head
+        // moves, making the whole square head-following. The tan(FOV/2) mapping
+        // is unchanged, so each dot still sits at the exact angle the Python fit
+        // assumes for this (x,y).
         Vector3 dirLocal = new Vector3(tx, ty, 1f).normalized;
-        Vector3 dirWorld = gazeCamera.transform.TransformDirection(dirLocal);
-
-        dotMarker.transform.position =
-            gazeCamera.transform.position + dirWorld * dotDistance;
+        dotMarker.transform.localPosition = dirLocal * dotDistance;
     }
 }
