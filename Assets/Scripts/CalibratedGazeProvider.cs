@@ -20,6 +20,15 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
     [SerializeField] private LayerMask layerMask = ~0;
     [SerializeField] private bool requireCalibrated = false;  // if true, ignore RAW until a fit exists otherwise if false, then just send a ray regardless
 
+    [Header("Debug ray colour")]
+    // EDITOR ONLY. Debug.DrawRay renders in the Scene view (and in the Game
+    // view with Gizmos on); it is not visible in the headset. The cursor the
+    // participant actually sees is GazeDebugOverlay's dot, which has its own
+    // colour pair. Both read the same UnityGazeBridge.Calibrated, so they will
+    // never disagree about the state, only about how it is drawn.
+    [SerializeField] private Color uncalibratedRayColor = new(1f, 0.25f, 0.2f, 1f);
+    [SerializeField] private Color calibratedRayColor = new(0.2f, 1f, 0.35f, 1f);
+
     public Vector2 ViewportPoint { get; private set; }
     public bool hasGaze { get; private set; }
 
@@ -38,7 +47,8 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
 
         // Before FIT the stream is RAW (uncalibrated direction, not a screen
         // position). Optionally skip it so gameplay only uses calibrated gaze.
-        if (requireCalibrated && !bridge.Calibrated) return false;
+        bool calibrated = bridge.Calibrated;
+        if (requireCalibrated && !calibrated) return false;
 
         Vector2 g = bridge.Gaze;                          // -1..1, y up
         Vector3 vp = new Vector3((g.x + 1f) * 0.5f,       // -1..1 -> 0..1 viewport
@@ -47,7 +57,8 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
         hasGaze = true;
 
         Ray ray = gazeCamera.ViewportPointToRay(vp);
-        Debug.DrawRay(ray.origin, ray.direction * maxDistance, Color.cyan);
+        Debug.DrawRay(ray.origin, ray.direction * maxDistance,
+                      calibrated ? calibratedRayColor : uncalibratedRayColor);
         return Physics.Raycast(ray, out hit, maxDistance, layerMask);
     }
 }

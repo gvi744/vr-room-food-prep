@@ -19,6 +19,12 @@ public class CalibrationDriver : MonoBehaviour
     // Fraction of FOV the outermost dots sit at, per axis. Lower X to pull the
     // sides into a comfortable viewing box (e.g. with an extended frame) without
     // touching the true optical FOV the fit relies on. 0.6 = inner 60%.
+    //
+    // WHATEVER THIS IS SET TO, the bridge must be started with the MATCHING
+    // effective FOV, because every degree it reports is computed from that
+    // number:  --fov-x  2*atan(boundaryFractionX * tan(fovXDeg/2))
+    //          --fov-y  2*atan(boundaryFractionY * tan(fovYDeg/2))
+    // At 0.30 with 110x96 that is 46.4 x 36.9, not the raw 110x96.
     [SerializeField, Range(0.1f, 1f)] private float boundaryFractionX = 0.6f;
     [SerializeField, Range(0.1f, 1f)] private float boundaryFractionY = 0.6f;
 
@@ -49,6 +55,14 @@ public class CalibrationDriver : MonoBehaviour
     // Optional. Assign a screen-corner TMP label to show sequence position,
     // e.g. "1/17". Total is calibration dots + (validation dots if enabled).
     [SerializeField] private TMP_Text progressLabel;
+    // What the label reads once the sequence is over. A terminal count like
+    // "17/17" says the dots were shown, which is not the question the operator
+    // is asking at that moment -- they want to know whether the run produced a
+    // calibration. The two are not the same: every dot can be recorded and FIT
+    // can still be refused, and in that case the counter would have read 9/9
+    // and stopped, looking like success.
+    [SerializeField] private string calibratedLabel = "Calibrated";
+    [SerializeField] private string notCalibratedLabel = "Not calibrated";
 
     // Running position across the whole calib+val sequence, for progressLabel.
     private int progressStep;
@@ -211,6 +225,12 @@ public class CalibrationDriver : MonoBehaviour
         if (fitOk && runValidation)
             yield return ValidationSequence(Targets.Length);
 
+        // THIS run's outcome, not bridge.Calibrated. A stale model from --load
+        // leaves the stream calibrated even when this run's FIT was refused,
+        // and reporting that as "Calibrated" would be the exact false
+        // reassurance the label exists to prevent.
+        SetProgressText(fitOk ? calibratedLabel : notCalibratedLabel);
+
         Restore();
         running = false;
     }
@@ -229,6 +249,9 @@ public class CalibrationDriver : MonoBehaviour
         progressTotal = ValTargets.Length;
         SetProgress(0, progressTotal);
         yield return ValidationSequence(0);
+        // A calibration already existed — that was the entry condition above —
+        // so the run ends calibrated whatever the validation numbers came out at.
+        SetProgressText(calibratedLabel);
         Restore();
         running = false;
     }
@@ -286,6 +309,12 @@ public class CalibrationDriver : MonoBehaviour
         progressStep = step;
         progressTotal = total;
         if (progressLabel != null) progressLabel.text = $"{step}/{total}";
+    }
+
+    // Terminal state, replacing the counter once there are no more dots to show.
+    private void SetProgressText(string text)
+    {
+        if (progressLabel != null) progressLabel.text = text;
     }
 
     private void PlaceDot(Vector2 t)

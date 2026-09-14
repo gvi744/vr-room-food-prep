@@ -2473,7 +2473,6 @@ GameObject:
   - component: {fileID: 1312036341}
   - component: {fileID: 1312036345}
   - component: {fileID: 1312036344}
-  - component: {fileID: 1312036346}
   m_Layer: 0
   m_Name: XR Origin (VR)
   m_TagString: Untagged
@@ -2562,33 +2561,6 @@ MonoBehaviour:
   sendPort: 9100
   listenPort: 9101
   LastValReport: 
---- !u!114 &1312036346
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1312036340}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6fc23b1d7fef17046a43f1ab7d86efd2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::CalibrationDriver
-  bridge: {fileID: 1312036345}
-  confirmProviderObject: {fileID: 1419662235}
-  gazeCamera: {fileID: 1679517766}
-  dotMarker: {fileID: 0}
-  dotDistance: 2
-  recordTimeout: 6
-  fovXDeg: 110
-  fovYDeg: 96
-  boundaryFractionX: 0.6
-  boundaryFractionY: 0.6
-  startButtonCanvas: {fileID: 0}
-  gazeInteractor: {fileID: 0}
-  allowKeyboardStart: 1
-  runValidation: 1
-  progressLabel: {fileID: 0}
 --- !u!1001 &1406896612
 PrefabInstance:
   m_ObjectHideFlags: 0
