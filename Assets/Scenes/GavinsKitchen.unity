@@ -2547,6 +2547,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 55
   requireCalibrated: 1
+  driver: {fileID: 656255288}
   uncalibratedRayColor: {r: 1, g: 0.25, b: 0.2, a: 1}
   calibratedRayColor: {r: 0.2, g: 1, b: 0.35, a: 1}
 --- !u!114 &1312036345
@@ -2740,8 +2741,9 @@ MonoBehaviour:
   gazeCamera: {fileID: 1679517766}
   canvasRect: {fileID: 1826195238}
   dot: {fileID: 280675876}
-  planeDistance: 1
+  planeDistance: 2
   showWhenRaw: 1
+  driver: {fileID: 656255288}
   tintByCalibration: 1
   uncalibratedColor: {r: 1, g: 0.25, b: 0.2, a: 0.9}
   calibratedColor: {r: 0.2, g: 1, b: 0.35, a: 0.9}
@@ -3871,7 +3873,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 1000, y: 1000}
+  m_SizeDelta: {x: 2000, y: 2000}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1826195240
 MonoBehaviour:

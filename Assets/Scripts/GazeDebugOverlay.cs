@@ -9,6 +9,7 @@ public class GazeDebugOverlay : MonoBehaviour
     [SerializeField] private RectTransform dot;
     [SerializeField] private float planeDistance = 1f;
     [SerializeField] private bool showWhenRaw = true;   // draw uncalibrated too
+    [SerializeField] private CalibrationDriver driver;
 
     [Header("Cursor colour")]
     // The visible state signal. The bridge streams RAW before a fit exists and
@@ -48,7 +49,7 @@ public class GazeDebugOverlay : MonoBehaviour
 
         canvasRect.localPosition = new Vector3(0f, 0f, planeDistance);
         canvasRect.localRotation = Quaternion.identity;
-        canvasRect.sizeDelta = new Vector2(w, h) / scale;
+        // canvasRect.sizeDelta = new Vector2(w, h) / scale;
     }
 
     private void Update()

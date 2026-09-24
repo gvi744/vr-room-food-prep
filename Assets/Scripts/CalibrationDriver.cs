@@ -337,7 +337,14 @@ public class CalibrationDriver : MonoBehaviour
         // moves, making the whole square head-following. The tan(FOV/2) mapping
         // is unchanged, so each dot still sits at the exact angle the Python fit
         // assumes for this (x,y).
-        Vector3 dirLocal = new Vector3(tx, ty, 1f).normalized;
-        dotMarker.transform.localPosition = dirLocal * dotDistance;
+        // Vector3 dirLocal = new Vector3(tx, ty, 1f).normalized;
+        dotMarker.transform.localPosition = NormToLocalDir(t) * dotDistance;
+    }
+
+    public Vector3 NormToLocalDir(Vector2 u)
+{
+        float tx = (u.x / TargetExtent) * boundaryFractionX * Mathf.Tan(fovXDeg * 0.5f * Mathf.Deg2Rad);
+        float ty = (u.y / TargetExtent) * boundaryFractionY * Mathf.Tan(fovYDeg * 0.5f * Mathf.Deg2Rad);
+        return new Vector3(tx, ty, 1f).normalized;
     }
 }

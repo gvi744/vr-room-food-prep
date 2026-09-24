@@ -19,6 +19,7 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
     [SerializeField] private float maxDistance = 10f;
     [SerializeField] private LayerMask layerMask = ~0;
     [SerializeField] private bool requireCalibrated = false;  // if true, ignore RAW until a fit exists otherwise if false, then just send a ray regardless
+    [SerializeField] private CalibrationDriver driver;
 
     [Header("Debug ray colour")]
     // EDITOR ONLY. Debug.DrawRay renders in the Scene view (and in the Game
@@ -56,7 +57,9 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
         ViewportPoint = vp;
         hasGaze = true;
 
-        Ray ray = gazeCamera.ViewportPointToRay(vp);
+        // Ray ray = gazeCamera.ViewportPointToRay(vp);
+        Vector3 d = driver.NormToLocalDir(g);
+        Ray ray = new Ray(gazeCamera.transform.position, gazeCamera.transform.TransformDirection(d));
         Debug.DrawRay(ray.origin, ray.direction * maxDistance,
                       calibrated ? calibratedRayColor : uncalibratedRayColor);
         return Physics.Raycast(ray, out hit, maxDistance, layerMask);
