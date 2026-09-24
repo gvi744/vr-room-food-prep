@@ -2105,13 +2105,15 @@ MonoBehaviour:
   recordTimeout: 6
   fovXDeg: 110
   fovYDeg: 96
-  boundaryFractionX: 0.3
-  boundaryFractionY: 0.3
+  boundaryFractionX: 0.1235
+  boundaryFractionY: 0.1588
   startButtonCanvas: {fileID: 248833790}
   gazeInteractor: {fileID: 1419662234}
   allowKeyboardStart: 1
   runValidation: 1
   progressLabel: {fileID: 625917165}
+  calibratedLabel: Calibrated
+  notCalibratedLabel: Not calibrated
 --- !u!4 &656255289
 Transform:
   m_ObjectHideFlags: 0
@@ -2545,6 +2547,8 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 55
   requireCalibrated: 1
+  uncalibratedRayColor: {r: 1, g: 0.25, b: 0.2, a: 1}
+  calibratedRayColor: {r: 0.2, g: 1, b: 0.35, a: 1}
 --- !u!114 &1312036345
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2738,6 +2742,9 @@ MonoBehaviour:
   dot: {fileID: 280675876}
   planeDistance: 1
   showWhenRaw: 1
+  tintByCalibration: 1
+  uncalibratedColor: {r: 1, g: 0.25, b: 0.2, a: 0.9}
+  calibratedColor: {r: 0.2, g: 1, b: 0.35, a: 0.9}
 --- !u!1001 &1440532410
 PrefabInstance:
   m_ObjectHideFlags: 0
