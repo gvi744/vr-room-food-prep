@@ -72,6 +72,24 @@ If you change FOV, distance or IPD, match both sides and recalibrate. Do not
 change the reported FOV alone to reduce the error number. A tracker restart,
 camera restart, changed eye model or headset movement requires recalibration.
 
+## Right camera upside down
+
+The GUI's `flip image` option is a **vertical flip**, not a 180-degree rotation.
+If the right feed is only vertically inverted, toggle its own checkbox.
+
+For a full half-turn of the current right image, restart the adapter with:
+
+```text
+python run_jason_stereo.py --tracker "C:/path/to/EyeTracker/3DTracker/Orlosky3DEyeTrackerStereo.py" --output stereo_gaze.json --right-rotation 180
+```
+
+Restore the GUI flip checkboxes to the same settings used before restarting.
+This extra rotation affects only the right frame, before cropping/detection.
+Use `--right-rotation 0` or omit it to disable this adapter adjustment. It does
+not undo separate rotation code in a custom tracker. The left camera and the
+Unity/bridge geometry settings stay unchanged. Warm up both eye models again,
+fix the spheres, and press C for a fresh calibration and validation.
+
 ## Verification status
 
 Python tests exercise the full nine-plus-eight UDP flow with synthetic eye
