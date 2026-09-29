@@ -69,8 +69,13 @@ public class GazeDebugOverlay : MonoBehaviour
         }
 
         Vector2 g = bridge.Gaze;   // -1..1, y up
+        /*
         dot.anchoredPosition = new Vector2(
             g.x * 0.5f * canvasRect.sizeDelta.x,
             g.y * 0.5f * canvasRect.sizeDelta.y);
+        */
+        Vector3 d = driver.NormToLocalDir(bridge.Gaze);
+        Vector3 p = d * (planeDistance / d.z);
+        dot.anchoredPosition = new Vector2(p.x, p.y) / canvasRect.localScale.x;
     }
 }
