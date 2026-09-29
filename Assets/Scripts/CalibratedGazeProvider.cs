@@ -1,15 +1,4 @@
-// CalibratedGazeProvider.cs — Fork B, direction-to-screen.
-//
-// The bridge streams GAZE,(x,y) already corrected by your polynomial, in
-// normalized -1..1 (y up), which is a screen/viewport position. We map that to
-// a viewport point and let the camera turn it into a world-space ray. Because
-// the XR camera's projection already encodes the headset's real FOV, the ray
-// angle is correct without setting fov_deg manually here. (fov_deg in
-// calibration.json remains only the reporting unit for accuracy-in-degrees.)
-//
-// Drop-in replacement for HeadGazeProvider: same IGazeProvider shape, so
-// GazeInteractor needs no changes.
-
+// Uses the shared binocular calibration geometry for the scene ray.
 using UnityEngine;
 
 public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
@@ -19,14 +8,10 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
     [SerializeField] private float maxDistance = 10f;
     [SerializeField] private LayerMask layerMask = ~0;
     [SerializeField] private bool requireCalibrated = false;  // if true, ignore RAW until a fit exists otherwise if false, then just send a ray regardless
-    [SerializeField] private CalibrationDriver driver;
+    [SerializeField] private GazeCalibrationGeometry geometry;
 
     [Header("Debug ray colour")]
-    // EDITOR ONLY. Debug.DrawRay renders in the Scene view (and in the Game
-    // view with Gizmos on); it is not visible in the headset. The cursor the
-    // participant actually sees is GazeDebugOverlay's dot, which has its own
-    // colour pair. Both read the same UnityGazeBridge.Calibrated, so they will
-    // never disagree about the state, only about how it is drawn.
+    // Debug.DrawRay is for the Editor; StereoGazeVisualizer draws headset dots.
     [SerializeField] private Color uncalibratedRayColor = new(1f, 0.25f, 0.2f, 1f);
     [SerializeField] private Color calibratedRayColor = new(0.2f, 1f, 0.35f, 1f);
 
@@ -44,22 +29,19 @@ public class CalibratedGazeProvider : MonoBehaviour, IGazeProvider
     {
         hit = default;
         hasGaze = false;
-        if (bridge == null || gazeCamera == null) return false;
+        if (bridge == null || gazeCamera == null || geometry == null) return false;
+        if (geometry.bridge != bridge || geometry.gazeCamera != gazeCamera ||
+            !bridge.GeometryVerified || !bridge.StereoValid) return false;
 
-        // Before FIT the stream is RAW (uncalibrated direction, not a screen
-        // position). Optionally skip it so gameplay only uses calibrated gaze.
         bool calibrated = bridge.Calibrated;
         if (requireCalibrated && !calibrated) return false;
-
-        Vector2 g = bridge.Gaze;                          // -1..1, y up
-        Vector3 vp = new Vector3((g.x + 1f) * 0.5f,       // -1..1 -> 0..1 viewport
-                                 (g.y + 1f) * 0.5f, 0f);
-        ViewportPoint = vp;
+        Vector2 g = bridge.Gaze;
+        Vector3 d = geometry.LocalDirection(g);
+        Ray ray = new Ray(gazeCamera.transform.position,
+                          gazeCamera.transform.TransformDirection(d));
+        ViewportPoint = gazeCamera.WorldToViewportPoint(geometry.WorldPoint(g));
         hasGaze = true;
 
-        // Ray ray = gazeCamera.ViewportPointToRay(vp);
-        Vector3 d = driver.NormToLocalDir(g);
-        Ray ray = new Ray(gazeCamera.transform.position, gazeCamera.transform.TransformDirection(d));
         Debug.DrawRay(ray.origin, ray.direction * maxDistance,
                       calibrated ? calibratedRayColor : uncalibratedRayColor);
         return Physics.Raycast(ray, out hit, maxDistance, layerMask);

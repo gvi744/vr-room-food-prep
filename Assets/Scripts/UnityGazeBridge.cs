@@ -4,8 +4,8 @@
 // Under Meta Horizon Link, Unity runs on the same PC as vr_bridge.py, so
 // pcIp is 127.0.0.1 (loopback), not the Quest's WiFi address.
 //
-// Receives RAW (uncalibrated) / GAZE (calibrated) into Gaze, both normalized
-// -1..1, y up. GAZE is the corrected screen position from your polynomial.
+// Receives GAZE2 (combined, left and right calibrated coordinates), INVALID,
+// and geometry ACK/ERR. RAW/GAZE remain supported for legacy protocol clients.
 // SendTarget/SendRecord/SendFit/SendReset drive the 9-point calibration.
 
 using System;
@@ -27,6 +27,20 @@ public class UnityGazeBridge : MonoBehaviour
     private Vector2 gaze;               // -1..1, y up
     private bool calibrated;            // false while the stream is still RAW
     private readonly object gazeLock = new();
+    private Vector2 leftGaze, rightGaze;
+    private long receivedAt;
+    private bool stereoValid;
+    public volatile bool GeometryVerified;
+    private static double NowSeconds =>
+        System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
+    public bool HasFreshGaze
+    {
+        get { lock (gazeLock) { return calibrated && receivedAt != 0 &&
+            NowSeconds - receivedAt / (double)System.Diagnostics.Stopwatch.Frequency < 0.5; } }
+    }
+    public Vector2 LeftGaze { get { lock (gazeLock) { return leftGaze; } } }
+    public Vector2 RightGaze { get { lock (gazeLock) { return rightGaze; } } }
+    public bool StereoValid { get { lock (gazeLock) { return stereoValid && HasFreshGaze; } } }
 
     public Vector2 Gaze      { get { lock (gazeLock) { return gaze; } } }
     public bool    Calibrated { get { lock (gazeLock) { return calibrated; } } }
@@ -75,6 +89,21 @@ public class UnityGazeBridge : MonoBehaviour
                 var p = msg.Split(',');
                 switch (p[0])
                 {
+                    case "GAZE2":
+                        if (p.Length != 7) break;
+                        Vector2 fused = new(Parse(p[1]), Parse(p[2]));
+                        Vector2 left = new(Parse(p[3]), Parse(p[4]));
+                        Vector2 right = new(Parse(p[5]), Parse(p[6]));
+                        lock (gazeLock)
+                        {
+                            gaze = fused; leftGaze = left; rightGaze = right;
+                            calibrated = stereoValid = true;
+                            receivedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                        }
+                        break;
+                    case "INVALID":
+                        lock (gazeLock) { calibrated = stereoValid = false; receivedAt = 0; }
+                        break;
                     case "GAZE":
                         SetGaze(Parse(p[1]), Parse(p[2]), true);
                         break;
@@ -86,6 +115,7 @@ public class UnityGazeBridge : MonoBehaviour
                         if (p.Length > 1)
                         {
                             bool ok = p[0] == "ACK";
+                            if (p[1] == "GEOMETRY") GeometryVerified = ok;
                             if (p[1] == "RECORD")    { if (ok) recordAcks++;    else recordErrs++;    }
                             if (p[1] == "FIT")       { if (ok) fitAcks++;       else fitErrs++;       }
                             if (p[1] == "VALRECORD") { if (ok) valRecordAcks++; else valRecordErrs++; }
@@ -102,15 +132,25 @@ public class UnityGazeBridge : MonoBehaviour
             catch (SocketException) { /* timeout or close */ }
             catch (ObjectDisposedException) { break; /* socket closed on shutdown */ }
             catch (FormatException)  { /* half-written packet; skip */ }
+            catch (IndexOutOfRangeException) { /* malformed packet; skip */ }
+            catch (OverflowException) { /* malformed number; skip */ }
         }
     }
 
-    private static float Parse(string s) =>
-        float.Parse(s, CultureInfo.InvariantCulture);   // bridge always sends "." decimals
+    private static float Parse(string s)
+    {
+        float value = float.Parse(s, CultureInfo.InvariantCulture);
+        if (float.IsNaN(value) || float.IsInfinity(value)) throw new FormatException("Nonfinite gaze");
+        return value;
+    }
 
     private void SetGaze(float x, float y, bool cal)
     {
-        lock (gazeLock) { gaze = new Vector2(x, y); calibrated = cal; }
+        lock (gazeLock)
+        {
+            gaze = new Vector2(x, y); calibrated = cal; stereoValid = false;
+            receivedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        }
     }
 
     // ── Calibration commands ────────────────────────────────────────────────
@@ -120,6 +160,9 @@ public class UnityGazeBridge : MonoBehaviour
     public void SendRecord() => Send("RECORD");
     public void SendFit()    => Send("FIT");
     public void SendReset()  => Send("RESET");
+    public void SendGeometry(float fovX, float fovY, float distanceM, float ipdMm) =>
+        Send(string.Format(CultureInfo.InvariantCulture, "GEOMETRY,{0:F6},{1:F6},{2:F6},{3:F6}",
+                           fovX, fovY, distanceM, ipdMm));
 
     // ── Validation commands (score the fit on independent targets) ──────────
     public void SendValTarget(int index, float x, float y) =>

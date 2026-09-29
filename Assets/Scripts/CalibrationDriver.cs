@@ -9,28 +9,8 @@ public class CalibrationDriver : MonoBehaviour
     [SerializeField] private MonoBehaviour confirmProviderObject;  // IConfirmProvider
     [SerializeField] private Camera gazeCamera;
     [SerializeField] private GameObject dotMarker;    // small sphere shown at each target
-    [SerializeField] private float dotDistance = 4f;  // metres in front of the camera
-    [SerializeField] private float recordTimeout = 6f; // > bridge's 5 s sampling deadline
-
-    [Header("Calibration square (head-locked)")]
-    // Must match calibration.py QUEST3_FOV_X_DEG / QUEST3_FOV_Y_DEG.
-    [SerializeField] private float fovXDeg = 110f;
-    [SerializeField] private float fovYDeg = 96f;
-    // Fraction of FOV the outermost dots sit at, per axis. Lower X to pull the
-    // sides into a comfortable viewing box (e.g. with an extended frame) without
-    // touching the true optical FOV the fit relies on. 0.6 = inner 60%.
-    //
-    // WHATEVER THIS IS SET TO, the bridge must be started with the MATCHING
-    // effective FOV, because every degree it reports is computed from that
-    // number:  --fov-x  2*atan(boundaryFractionX * tan(fovXDeg/2))
-    //          --fov-y  2*atan(boundaryFractionY * tan(fovYDeg/2))
-    // At 0.30 with 110x96 that is 46.4 x 36.9, not the raw 110x96.
-    [SerializeField, Range(0.1f, 1f)] private float boundaryFractionX = 0.6f;
-    [SerializeField, Range(0.1f, 1f)] private float boundaryFractionY = 0.6f;
-
-    // The raw target arrays reach ±0.8 at their extremes; dividing by this makes
-    // the outermost dot map to the boundary fraction of the FOV exactly.
-    private const float TargetExtent = 0.8f;
+    [SerializeField] private GazeCalibrationGeometry geometry;
+    [SerializeField] private float recordTimeout = 6f;
 
     [Header("Scene toggles during calibration")]
     [SerializeField] private GameObject startButtonCanvas; // world-space button, hidden while running
@@ -116,14 +96,14 @@ public class CalibrationDriver : MonoBehaviour
     // Call this from the world-space button's OnClick, or press C in the Editor.
     public void Begin()
     {
-        if (!running) StartCoroutine(RunCalibration());
+        if (!running && ReadyGeometry()) StartCoroutine(RunCalibration());
     }
 
     // Re-check accuracy of the CURRENT calibration (e.g. after starting the
     // bridge with --load) without recalibrating. Press V, or call from a button.
     public void BeginValidation()
     {
-        if (!running) StartCoroutine(RunValidationOnly());
+        if (!running && ReadyGeometry()) StartCoroutine(RunValidationOnly());
     }
 
     // Hide the start button and stop gameplay selection so a trigger press only
@@ -217,9 +197,9 @@ public class CalibrationDriver : MonoBehaviour
 
         bool fitOk = bridge.FitAcks != fAcks;
         if (fitOk)
-            Debug.Log("[calib] done — FIT acknowledged; provider now receives GAZE");
+            Debug.Log("[calib] done — FIT acknowledged; provider now receives GAZE2");
         else
-            Debug.LogError("[calib] FIT failed or timed out — stream stays RAW; see bridge log");
+            Debug.LogError("[calib] FIT failed or timed out — no binocular gaze available; see bridge log");
 
         // Immediately re-check accuracy on targets the fit never saw.
         if (fitOk && runValidation)
@@ -238,7 +218,7 @@ public class CalibrationDriver : MonoBehaviour
     private IEnumerator RunValidationOnly()
     {
         if (bridge == null || confirm == null) yield break;
-        if (!bridge.Calibrated)
+        if (!bridge.StereoValid)
         {
             Debug.LogWarning("[valid] no calibrated stream — run calibration first, " +
                              "or start the bridge with --load");
@@ -299,7 +279,7 @@ public class CalibrationDriver : MonoBehaviour
 
         if (bridge.ValReportAcks != rAcks)
             Debug.Log("[valid] RESULT — " + bridge.LastValReport +
-                      " (saved to validation_report.json next to the bridge)");
+                      " (saved to validation_stereo_report.json next to the bridge)");
         else
             Debug.LogError("[valid] no validation report received — see bridge log");
     }
@@ -317,34 +297,22 @@ public class CalibrationDriver : MonoBehaviour
         if (progressLabel != null) progressLabel.text = text;
     }
 
+    private bool ReadyGeometry()
+    {
+        if (bridge != null && geometry != null && geometry.bridge == bridge &&
+            geometry.gazeCamera == gazeCamera && gazeCamera != null &&
+            dotMarker != null && confirm != null && bridge.GeometryVerified) return true;
+        Debug.LogError("[calib] Check shared geometry, camera, marker and confirm references, " +
+                       "then wait for ACK,GEOMETRY,matched before starting.");
+        return false;
+    }
+
     private void PlaceDot(Vector2 t)
     {
-        if (dotMarker == null || gazeCamera == null) return;
-
-        // Normalize so the ±0.8 extremes become ±1 "square edge", then scale by
-        // the per-axis boundary fraction to sit at that fraction of the real FOV.
-        // Same tan(FOV/2) mapping calibration.py uses, so the dot is at the exact
-        // angle the fit assumes for this (x,y) — Option A, Python untouched.
-        float nx = (t.x / TargetExtent) * boundaryFractionX;
-        float ny = (t.y / TargetExtent) * boundaryFractionY;
-
-        float tx = nx * Mathf.Tan(fovXDeg * 0.5f * Mathf.Deg2Rad);
-        float ty = ny * Mathf.Tan(fovYDeg * 0.5f * Mathf.Deg2Rad);
-
-        // Direction in the camera's local frame: forward, offset by the tangents.
-        // The dot is parented to the camera (see TakeOver), so a local position
-        // is all we set — Unity re-derives the world pose each frame as the head
-        // moves, making the whole square head-following. The tan(FOV/2) mapping
-        // is unchanged, so each dot still sits at the exact angle the Python fit
-        // assumes for this (x,y).
-        // Vector3 dirLocal = new Vector3(tx, ty, 1f).normalized;
-        dotMarker.transform.localPosition = NormToLocalDir(t) * dotDistance;
+        if (dotMarker == null || geometry == null) return;
+        dotMarker.transform.localPosition = geometry.LocalPoint(t);
     }
 
-    public Vector3 NormToLocalDir(Vector2 u)
-{
-        float tx = (u.x / TargetExtent) * boundaryFractionX * Mathf.Tan(fovXDeg * 0.5f * Mathf.Deg2Rad);
-        float ty = (u.y / TargetExtent) * boundaryFractionY * Mathf.Tan(fovYDeg * 0.5f * Mathf.Deg2Rad);
-        return new Vector3(tx, ty, 1f).normalized;
-    }
+    // Retained for the existing overlay and callers on the reduced-boundary branch.
+    public Vector3 NormToLocalDir(Vector2 u) => geometry.LocalDirection(u);
 }
