@@ -1,9 +1,9 @@
 # Binocular calibration in GavinsKitchen
 
-Unity branch: `codex/binocular-unity`, based on
+Unity branch: `binocular-unity`, based on
 `shrinking-square-boundary-to-10-degrees-per-Jason's-recommendation` at
 `e66f3f4e892478a26f7277f5e2639187e7cf2541`.
-Use this with `codex/binocular-calibration` in `project-110-calibration`.
+Use this with `binocular-calibration` in `project-110-calibration`.
 Keep Unity **6000.4.6f1**, as recorded in ProjectVersion.txt.
 
 ## Scene changes already saved
