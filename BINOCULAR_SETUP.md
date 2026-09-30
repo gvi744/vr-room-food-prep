@@ -33,40 +33,99 @@ No extra Unity render camera is needed. The two USB cameras run in Python.
 The existing EyeTracker.cs file is retained but is not attached to this scene;
 do not add a second calibration component alongside this pipeline.
 
+The original default `vr_bridge.py` is monocular. Use the new `--stereo`
+mode, which reads timestamped per-eye JSON, calibrates each eye independently,
+and combines the two corrected ray intersections with the same 2m target
+sphere in Python. Unity receives the combined and per-eye coordinates in one
+`GAZE2` packet. This preserves one ray for existing gaze interaction; it is not
+an estimate of object depth from triangulation. Do not run two old bridges or
+send Jason's twelve-value CSV to the monocular reader.
+
 ## First lab run
 
-1. Open GavinsKitchen on this branch. On XR Origin / GazeCalibrationGeometry,
-   change **IPD mm** from the example 64 to the participant's actual IPD. Use
-   the same number below. All other scene references are already assigned.
-2. In the calibration repo's pinned Python environment, launch Jason's latest
-   stereo tracker through our adapter (replace the tracker path):
+1. Update both repositories in their own lab folders. Keep any local changes
+   if Git asks you to resolve them; do not force a reset.
 
    ```text
-   python run_jason_stereo.py --tracker "C:/path/to/EyeTracker/3DTracker/Orlosky3DEyeTrackerStereo.py" --output stereo_gaze.json
+   # In project-110-calibration
+   git fetch origin
+   git switch binocular-calibration
+   git pull --ff-only
+
+   # In vr-room-food-prep
+   git fetch origin
+   git switch binocular-unity
+   git pull --ff-only
    ```
 
-3. Select different physical camera indices, one eye each. Verify left/right
-   by briefly covering each lens. Set cropping/flips before calibration, warm
-   up both eye models, then fix the spheres with F in a tracker window.
-4. In another terminal in the same calibration repo, run:
+2. Open GavinsKitchen with Unity **6000.4.6f1**. On XR Origin /
+   GazeCalibrationGeometry, use FOV X **24.866242**, FOV Y **24.864738**,
+   target distance **2**, and change **IPD mm** from example 64 to the
+   participant's actual IPD. All scene references are already assigned.
+   With Quest Link on the same PC, UnityGazeBridge uses IP **127.0.0.1**,
+   send port **9100**, receive port **9101**. Keep only one bridge running.
+3. In a terminal in `project-110-calibration`, use the existing pinned Python
+   environment and launch Jason's stereo tracker through the adapter:
 
    ```text
-   python vr_bridge.py --stereo --stereo-file stereo_gaze.json --fov-x 24.866242 --fov-y 24.864738 --target-distance 2 --ipd-mm 64 --sample-window 2 --min-confidence 0
+   python run_jason_stereo.py --tracker "C:/path/to/EyeTracker/3DTracker/Orlosky3DEyeTrackerStereo.py" --output stereo_gaze.json --right-rotation 180
    ```
 
-   Use the same actual IPD as Unity. On the Mac use `./.venv/bin/python`.
-   Keep NumPy 1.26.4 and OpenCV 4.10.0.84. Add `--unity-ip` only if Unity is on
-   another device. Defaults use the same PC under Quest Link (UDP 9100/9101).
-   Upstream does not export stereo confidence; zero disables that filter while
-   validity, timestamp, frame-pair and fixed-sphere checks remain active.
-5. Play and wait for `ACK,GEOMETRY,matched`. Press C in the Unity Game window,
-   or use the existing calibration start button. Complete a fresh 9+8 run,
-   keeping fixation until each recording finishes. The old monocular model
-   cannot be reused. Use V only to validate the current binocular model.
-6. Confirm `validation_stereo_<timestamp>.json` contains eight targets and
-   left/right/combined errors. Stop either camera after fitting: all three
-   gaze dots and gaze selection must stop when freshness expires. Repeat a
-   full run before comparing accuracy with the single-camera baseline.
+   Replace the tracker path. The rotation option addresses the reported
+   upside-down right feed; use 0 instead if the feed is already correctly
+   oriented. The GUI vertical flip is a separate setting, described below.
+   On Windows, replace `python` with `.\.venv\Scripts\python.exe` if the
+   environment is not activated. On Mac use `./.venv/bin/python`. Keep
+   NumPy **1.26.4** and OpenCV **4.10.0.84**.
+4. Select different physical camera indices, one eye each. Verify left/right
+   by briefly covering each lens. Set cropping/flips before calibration,
+   start both cameras, look around the target area to warm up both eye models,
+   then fix the spheres with F in a tracker window or **fixed eye sphere**.
+5. In a second terminal in the **same calibration folder**, check the live
+   input while keeping both cameras running and looking steadily near centre:
+
+   ```text
+   python check_stereo_input.py --stereo-file stereo_gaze.json --seconds 10 --sample-window 2 --min-confidence 0
+   ```
+
+   Look for **PASS** and at least six fresh pairs in each two-second window.
+   The saved `stereo_input_check.json` includes per-eye update rates, accepted
+   pair rate, timing skew and rejection reasons. This tests input availability,
+   not accuracy. Fix a failed camera, unfixed sphere or stale path before
+   continuing. If input is valid but too slow, try `--sample-window 3` in both
+   this check and the bridge. Do not loosen timestamp limits just to pass.
+6. In that second terminal, start the bridge after the check finishes:
+
+   ```text
+   python vr_bridge.py --stereo --stereo-file stereo_gaze.json --fov-x 24.866242 --fov-y 24.864738 --target-distance 2 --ipd-mm 64 --sample-window 2 --min-confidence 0 --session-note "binocular run 1"
+   ```
+
+   Use the same actual IPD as Unity. Add `--unity-ip` only if Unity is on
+   another device. Upstream does not export stereo confidence; zero disables
+   that filter while validity, timestamp, pairing and fixed-sphere checks
+   remain active. Do not use the old `--min-confidence 0.5` here, or load the
+   monocular calibration file. Stereo selects its own direction model.
+7. Play and wait for `ACK,GEOMETRY,matched`. Press C in the Unity Game window,
+   or use the existing calibration start button. Complete a fresh **9+8** run.
+   At each target, look with both eyes, press the usual right-controller
+   confirmation trigger, and keep fixation until the target moves. Look at
+   the target, not the gaze dots. No green dot before FIT is expected.
+   Use V only to validate the current binocular model without refitting.
+8. Read `validation_stereo_<timestamp>.json` in the calibration folder; the
+   latest copy is `validation_stereo_report.json`.
+   - `n_targets` must be **8**.
+   - `accuracy_deg` is the mean combined error; `max_error_deg` is the worst
+     target error. The all-targets goal requires **max < 1** and
+     **all_targets_under_1_deg = true**, not just mean < 1.
+   - `eyes.left` and `eyes.right` summarise each eye separately. Each entry in
+     `per_target` contains combined `error_deg`, `left.error_deg` and
+     `right.error_deg`, plus precision and accepted sample information.
+   - Green is combined, cyan is left, magenta is right. If one eye is much
+     worse, correct that camera/model before interpreting the combined result.
+9. After saving the report, stop either camera: all three gaze dots and gaze
+   selection must stop when freshness expires (about 0.5s). Restart and perform
+   a fresh C calibration for further testing. Repeat full runs before comparing
+   with the single-camera baseline; a software test is not a hardware result.
 
 If you change FOV, distance or IPD, match both sides and recalibrate. Do not
 change the reported FOV alone to reduce the error number. A tracker restart,
