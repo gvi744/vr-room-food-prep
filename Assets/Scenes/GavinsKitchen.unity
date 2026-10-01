@@ -2108,6 +2108,7 @@ MonoBehaviour:
   gazeInteractor: {fileID: 1419662234}
   allowKeyboardStart: 1
   runValidation: 1
+  showGazeDuringValidation: 1
   progressLabel: {fileID: 625917165}
   progressOffsetMetres: 0.1
   calibratedLabel: Calibrated

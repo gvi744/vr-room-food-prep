@@ -31,6 +31,8 @@ public class CalibrationDriver : MonoBehaviour
 
     [Header("Validation")]
     [SerializeField] private bool runValidation = true; // re-check accuracy after FIT
+    [Tooltip("Show live gaze feedback during validation. Turn off for a study without gaze feedback.")]
+    [SerializeField] private bool showGazeDuringValidation = true;
 
     [Header("Progress overlay")]
     // World-space label follows the target, independently of the old overlay.
@@ -293,6 +295,10 @@ public class CalibrationDriver : MonoBehaviour
     // full calibration, 0 for validation-only), so the counter reads continuously.
     private IEnumerator ValidationSequence(int stepOffset)
     {
+        // Both post-calibration and V-only validation use this display setting.
+        if (gazeVisualizer != null)
+            gazeVisualizer.enabled = visualizerWasEnabled && showGazeDuringValidation;
+
         for (int i = 0; i < ValTargets.Length; i++)
         {
             Vector2 t = ValTargets[i];

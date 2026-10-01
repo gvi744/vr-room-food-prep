@@ -18,7 +18,11 @@ polynomial. A fresh C calibration is required after this update.
 The progress label now follows 0.10m above the current target. It shows a
 recording timer during collection. The scene includes the label size and
 visualizer references, so no extra manual wiring is needed. The three gaze
-feedback dots hide during calibration/validation and return afterwards.
+feedback dots hide during the nine calibration targets, then appear during the
+eight validation targets and remain afterwards. V-only validation also shows
+them. CalibrationDriver > Show Gaze During Validation is saved enabled; untick
+it for a study without live gaze feedback. Keep that choice consistent across
+participants and record it in the session log.
 
 Network sends now run on a background thread, with a numeric IP endpoint
 prepared at startup. Repeated gaze/heartbeat logs are removed and the text is
@@ -52,7 +56,7 @@ sub-degree validation accuracy.
   compatibility with the existing overlay script.
 - The previous overlay component and its GazeDot are disabled. The progress
   canvas and Interactor stay enabled. New green/cyan/magenta dots show combined,
-  left and right gaze using the same target geometry after the sequence. Their URP material is
+  left and right gaze using the same target geometry during validation and afterwards. Their URP material is
   assigned, their colliders are disabled, and they hide on tracking loss.
 - Python and Unity must acknowledge matching geometry before calibration.
   Stale or invalid binocular data cannot drive gaze interaction.
@@ -137,8 +141,9 @@ send Jason's twelve-value CSV to the monocular reader.
    or use the existing calibration start button. Complete a fresh **9+8** run.
    At each target, look with both eyes, press the usual right-controller
    confirmation trigger, and keep fixation until the target moves. Look at
-   the target. Gaze feedback dots stay hidden during the sequence and return
-   afterwards when the calibrated stream is valid.
+   the target rather than following the moving gaze dots. Gaze feedback stays
+   hidden for targets 1-9 and appears for validation targets 10-17 whenever
+   the calibrated stream is valid. It remains visible after the sequence.
    Use V only to validate the current binocular model without refitting.
 8. Read `validation_stereo_<timestamp>.json` in the calibration folder; the
    latest copy is `validation_stereo_report.json`.
