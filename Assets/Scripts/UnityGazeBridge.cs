@@ -9,6 +9,7 @@
 // SendTarget/SendRecord/SendFit/SendReset drive the 9-point calibration.
 
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -65,26 +66,71 @@ public class UnityGazeBridge : MonoBehaviour
     private UdpClient rx;
     private UdpClient tx;
     private Thread rxThread;
+    private Thread txThread;
+    private readonly ConcurrentQueue<byte[]> outgoing = new();
+    private readonly ConcurrentQueue<string> notices = new();
+    private readonly AutoResetEvent sendReady = new(false);
     private volatile bool running;
 
-    void Start()
+    void OnEnable()
     {
-        tx = new UdpClient();
-        rx = new UdpClient(listenPort);
+        // Resolve a numeric address once, never a hostname on the render thread.
+        if (!IPAddress.TryParse(pcIp, out IPAddress address))
+        {
+            Debug.LogError("UnityGazeBridge: pcIp must be a numeric IP address, e.g. 127.0.0.1");
+            enabled = false;
+            return;
+        }
+        var destination = new IPEndPoint(address, sendPort);
+        try
+        {
+            tx = new UdpClient(address.AddressFamily);
+            tx.Client.SendTimeout = 250;
+            rx = new UdpClient(listenPort);
+        }
+        catch (SocketException e)
+        {
+            Debug.LogError("UnityGazeBridge: cannot open UDP ports: " + e.Message);
+            enabled = false;
+            return;
+        }
+        GeometryVerified = false;
         running = true;
-        rxThread = new Thread(ReceiveLoop) { IsBackground = true };
+        UdpClient receiver = rx, sender = tx;
+        rxThread = new Thread(() => ReceiveLoop(receiver)) { IsBackground = true };
+        txThread = new Thread(() => SendLoop(sender, destination)) { IsBackground = true };
         rxThread.Start();
+        txThread.Start();
         Send("PING");   // connectivity smoke test; expect ACK,PING in the log
     }
 
-    void ReceiveLoop()
+    void SendLoop(UdpClient sender, IPEndPoint destination)
+    {
+        while (running && sender == tx)
+        {
+            sendReady.WaitOne(100);
+            while (running && sender == tx && outgoing.TryDequeue(out byte[] data))
+            {
+                try { sender.Send(data, data.Length, destination); }
+                catch (ObjectDisposedException) { return; }
+                catch (SocketException e) { Notice("[bridge] send failed: " + e.Message); }
+            }
+        }
+    }
+
+    void Notice(string message)
+    {
+        if (notices.Count < 64) notices.Enqueue(message);
+    }
+
+    void ReceiveLoop(UdpClient receiver)
     {
         var ep = new IPEndPoint(IPAddress.Any, listenPort);
-        while (running)
+        while (running && receiver == rx)
         {
             try
             {
-                var data = rx.Receive(ref ep);
+                var data = receiver.Receive(ref ep);
                 var msg = Encoding.UTF8.GetString(data);
                 var p = msg.Split(',');
                 switch (p[0])
@@ -112,20 +158,25 @@ public class UnityGazeBridge : MonoBehaviour
                         break;
                     case "ACK":
                     case "ERR":
+                        bool logResponse = true;
                         if (p.Length > 1)
                         {
                             bool ok = p[0] == "ACK";
-                            if (p[1] == "GEOMETRY") GeometryVerified = ok;
+                            if (p[1] == "GEOMETRY")
+                            {
+                                logResponse = GeometryVerified != ok || !ok;
+                                GeometryVerified = ok;
+                            }
                             if (p[1] == "RECORD")    { if (ok) recordAcks++;    else recordErrs++;    }
                             if (p[1] == "FIT")       { if (ok) fitAcks++;       else fitErrs++;       }
                             if (p[1] == "VALRECORD") { if (ok) valRecordAcks++; else valRecordErrs++; }
                             if (p[1] == "VALREPORT")
                             {
-                                if (ok) { LastValReport = msg.Substring("ACK,VALREPORT,".Length); valReportAcks++; }
+                                if (ok && p.Length >= 3) { LastValReport = msg.Substring("ACK,VALREPORT,".Length); valReportAcks++; }
                                 else valReportErrs++;
                             }
                         }
-                        Debug.Log("[bridge] " + msg);
+                        if (logResponse) Notice("[bridge] " + msg);
                         break;
                 }
             }
@@ -173,20 +224,29 @@ public class UnityGazeBridge : MonoBehaviour
 
     void Send(string msg)
     {
-        var bytes = Encoding.UTF8.GetBytes(msg);
-        tx.Send(bytes, bytes.Length, pcIp, sendPort);
+        if (!running) return;
+        // Enqueue only: socket sends and any OS wait happen on the worker.
+        outgoing.Enqueue(Encoding.UTF8.GetBytes(msg));
+        sendReady.Set();
     }
 
     void OnDisable()
     {
         running = false;
+        GeometryVerified = false;
+        lock (gazeLock) { calibrated = stereoValid = false; receivedAt = 0; }
+        sendReady.Set();
         try { rx?.Close(); } catch { }
         try { tx?.Close(); } catch { }
+        rxThread?.Join(100);
+        txThread?.Join(100);
+        while (outgoing.TryDequeue(out _)) { }
     }
 
     void Update()
-{
-    if (Time.frameCount % 60 == 0)
-        Debug.Log($"[bridge] gaze={Gaze} calibrated={Calibrated}");
+    {
+        // Do not write per-frame gaze logs or repeated successful heartbeats.
+        for (int i = 0; i < 4 && notices.TryDequeue(out string message); i++)
+            Debug.Log(message);
     }
 }

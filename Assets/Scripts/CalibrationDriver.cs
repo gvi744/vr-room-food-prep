@@ -11,6 +11,7 @@ public class CalibrationDriver : MonoBehaviour
     [SerializeField] private GameObject dotMarker;    // small sphere shown at each target
     [SerializeField] private GazeCalibrationGeometry geometry;
     [SerializeField] private float recordTimeout = 6f;
+    [SerializeField] private StereoGazeVisualizer gazeVisualizer;
 
     [Header("Scene toggles during calibration")]
     [SerializeField] private GameObject startButtonCanvas; // world-space button, hidden while running
@@ -32,9 +33,9 @@ public class CalibrationDriver : MonoBehaviour
     [SerializeField] private bool runValidation = true; // re-check accuracy after FIT
 
     [Header("Progress overlay")]
-    // Optional. Assign a screen-corner TMP label to show sequence position,
-    // e.g. "1/17". Total is calibration dots + (validation dots if enabled).
+    // World-space label follows the target, independently of the old overlay.
     [SerializeField] private TMP_Text progressLabel;
+    [SerializeField] private float progressOffsetMetres = 0.10f;
     // What the label reads once the sequence is over. A terminal count like
     // "17/17" says the dots were shown, which is not the question the operator
     // is asking at that moment -- they want to know whether the run produced a
@@ -47,6 +48,11 @@ public class CalibrationDriver : MonoBehaviour
     // Running position across the whole calib+val sequence, for progressLabel.
     private int progressStep;
     private int progressTotal;
+    private string phase = "";
+    private float phaseStarted, nextLabelUpdate;
+    private Vector3 labelOriginalPosition;
+    private Quaternion labelOriginalRotation;
+    private bool visualizerWasEnabled;
 
     // Same order and positions as collect_9point.py CALIB_TARGETS. Normalized
     // -1..1, y up, (0,0) = centre.
@@ -82,21 +88,53 @@ public class CalibrationDriver : MonoBehaviour
     {
         confirm = confirmProviderObject as IConfirmProvider;
         if (gazeCamera == null) gazeCamera = Camera.main;
+        if (progressLabel != null)
+        {
+            labelOriginalPosition = progressLabel.transform.localPosition;
+            labelOriginalRotation = progressLabel.transform.localRotation;
+            // Build the small status label before the user starts calibration.
+            string original = progressLabel.text;
+            progressLabel.text = "0123456789/ .s\nLook at target\nRecording\nFitting\nSaving report\nCalibrated\nNot calibrated";
+            progressLabel.ForceMeshUpdate();
+            progressLabel.text = original;
+            progressLabel.ForceMeshUpdate();
+        }
         if (confirm == null)
             Debug.LogError("CalibrationDriver: confirmProviderObject does not implement IConfirmProvider");
     }
 
     private void Update()
     {
+        if (running)
+        {
+            if (Time.unscaledDeltaTime > 0.25f)
+                Debug.LogWarning($"[calib timing] Unity frame took {Time.unscaledDeltaTime:F2}s during {phase}, target {progressStep}/{progressTotal}");
+            if (Time.unscaledTime >= nextLabelUpdate) RefreshProgress();
+        }
         if (!allowKeyboardStart || Keyboard.current == null) return;
         if (Keyboard.current.cKey.wasPressedThisFrame) Begin();
         if (Keyboard.current.vKey.wasPressedThisFrame) BeginValidation();
     }
 
+    private void LateUpdate()
+    {
+        if (!running || progressLabel == null || dotMarker == null || gazeCamera == null) return;
+        progressLabel.transform.position = dotMarker.transform.position +
+                                           gazeCamera.transform.up * progressOffsetMetres;
+        progressLabel.transform.rotation = gazeCamera.transform.rotation;
+    }
+
     // Call this from the world-space button's OnClick, or press C in the Editor.
     public void Begin()
     {
-        if (!running && ReadyGeometry()) StartCoroutine(RunCalibration());
+        if (!running && ReadyGeometry())
+        {
+            double started = Time.realtimeSinceStartupAsDouble;
+            StartCoroutine(RunCalibration());
+            double elapsed = Time.realtimeSinceStartupAsDouble - started;
+            if (elapsed > 0.1)
+                Debug.LogWarning($"[calib timing] Starting calibration took {elapsed:F2}s before its first yield");
+        }
     }
 
     // Re-check accuracy of the CURRENT calibration (e.g. after starting the
@@ -112,6 +150,11 @@ public class CalibrationDriver : MonoBehaviour
     {
         if (startButtonCanvas != null) startButtonCanvas.SetActive(false);
         if (gazeInteractor != null)    gazeInteractor.enabled = false;
+        if (gazeVisualizer != null)
+        {
+            visualizerWasEnabled = gazeVisualizer.enabled;
+            gazeVisualizer.enabled = false;
+        }
         if (dotMarker != null && gazeCamera != null)
         {
             dotMarker.SetActive(true);
@@ -137,6 +180,12 @@ public class CalibrationDriver : MonoBehaviour
         }
         if (gazeInteractor != null)    gazeInteractor.enabled = true;
         if (startButtonCanvas != null) startButtonCanvas.SetActive(true);
+        if (gazeVisualizer != null) gazeVisualizer.enabled = visualizerWasEnabled;
+        if (progressLabel != null)
+        {
+            progressLabel.transform.localPosition = labelOriginalPosition;
+            progressLabel.transform.localRotation = labelOriginalRotation;
+        }
     }
 
     private IEnumerator RunCalibration()
@@ -167,15 +216,16 @@ public class CalibrationDriver : MonoBehaviour
             yield return new WaitUntil(() => confirm.IsConfirmed());
 
             int acks = bridge.RecordAcks, errs = bridge.RecordErrs;
-            bridge.SendRecord();                  // bridge samples ~1 s, IQR-reduces
+            SetPhase("Recording");
+            bridge.SendRecord();
 
             // Advance on the bridge's actual response, not a blind timer — a
             // slow tracker means RECORD can take up to 5 s, and moving the dot
             // while the bridge is still sampling contaminates the pair.
-            float deadline = Time.time + recordTimeout;
+            float deadline = Time.unscaledTime + recordTimeout;
             yield return new WaitUntil(() =>
                 bridge.RecordAcks != acks || bridge.RecordErrs != errs ||
-                Time.time >= deadline);
+                Time.unscaledTime >= deadline);
 
             if (bridge.RecordAcks == acks)
             {
@@ -189,11 +239,12 @@ public class CalibrationDriver : MonoBehaviour
         }
 
         int fAcks = bridge.FitAcks, fErrs = bridge.FitErrs;
+        SetPhase("Fitting");
         bridge.SendFit();
-        float fitDeadline = Time.time + 3f;
+        float fitDeadline = Time.unscaledTime + recordTimeout;
         yield return new WaitUntil(() =>
             bridge.FitAcks != fAcks || bridge.FitErrs != fErrs ||
-            Time.time >= fitDeadline);
+            Time.unscaledTime >= fitDeadline);
 
         bool fitOk = bridge.FitAcks != fAcks;
         if (fitOk)
@@ -255,11 +306,12 @@ public class CalibrationDriver : MonoBehaviour
             yield return new WaitUntil(() => confirm.IsConfirmed());
 
             int acks = bridge.ValRecordAcks, errs = bridge.ValRecordErrs;
+            SetPhase("Recording");
             bridge.SendValRecord();
-            float deadline = Time.time + recordTimeout;
+            float deadline = Time.unscaledTime + recordTimeout;
             yield return new WaitUntil(() =>
                 bridge.ValRecordAcks != acks || bridge.ValRecordErrs != errs ||
-                Time.time >= deadline);
+                Time.unscaledTime >= deadline);
 
             if (bridge.ValRecordAcks == acks)
             {
@@ -271,11 +323,12 @@ public class CalibrationDriver : MonoBehaviour
         }
 
         int rAcks = bridge.ValReportAcks, rErrs = bridge.ValReportErrs;
+        SetPhase("Saving report");
         bridge.SendValReport();
-        float reportDeadline = Time.time + 3f;
+        float reportDeadline = Time.unscaledTime + recordTimeout;
         yield return new WaitUntil(() =>
             bridge.ValReportAcks != rAcks || bridge.ValReportErrs != rErrs ||
-            Time.time >= reportDeadline);
+            Time.unscaledTime >= reportDeadline);
 
         if (bridge.ValReportAcks != rAcks)
             Debug.Log("[valid] RESULT — " + bridge.LastValReport +
@@ -288,7 +341,22 @@ public class CalibrationDriver : MonoBehaviour
     {
         progressStep = step;
         progressTotal = total;
-        if (progressLabel != null) progressLabel.text = $"{step}/{total}";
+        SetPhase("Look at target");
+    }
+
+    private void SetPhase(string value)
+    {
+        phase = value;
+        phaseStarted = Time.unscaledTime;
+        RefreshProgress();
+    }
+
+    private void RefreshProgress()
+    {
+        nextLabelUpdate = Time.unscaledTime + 0.1f;
+        string detail = phase == "Recording" ? $"Recording {Time.unscaledTime - phaseStarted:F1}s" : phase;
+        string text = $"{progressStep}/{progressTotal}\n{detail}";
+        if (progressLabel != null && progressLabel.text != text) progressLabel.text = text;
     }
 
     // Terminal state, replacing the counter once there are no more dots to show.

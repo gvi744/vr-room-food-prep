@@ -6,6 +6,34 @@ Unity branch: `binocular-unity`, based on
 Use this with `binocular-calibration` in `project-110-calibration`.
 Keep Unity **6000.4.6f1**, as recorded in ProjectVersion.txt.
 
+## 1 October: calibration UI and nine-point update
+
+Pull both companion branches before testing. The full sequence is still **17
+targets: 9 calibration + 8 independent validation**. Python now defaults to
+`--stereo-fit nine-point`, using all four corners as well as the centre and
+cardinal targets. Use `--stereo-fit five-point` for the previous baseline.
+The new fit uses 3D direction tangents with a fitted offset, not the old pupil
+polynomial. A fresh C calibration is required after this update.
+
+The progress label now follows 0.10m above the current target. It shows a
+recording timer during collection. The scene includes the label size and
+visualizer references, so no extra manual wiring is needed. The three gaze
+feedback dots hide during calibration/validation and return afterwards.
+
+Network sends now run on a background thread, with a numeric IP endpoint
+prepared at startup. Repeated gaze/heartbeat logs are removed and the text is
+prepared before pressing C. These remove possible stalls from the start path;
+the reported full-frame pause has not been reproduced on the development Mac.
+If the lab still freezes, retain `[calib timing]` Console messages and record
+the Editor Profiler. The two-second collection itself must leave rendering and
+head motion responsive.
+
+The model and report include `calibration_diagnostics`: training-point errors
+and jitter, kept separate from the eight independent validation scores. A
+nine-point fit should report `model_n_train: 9` and model
+`binocular_direction_9point`. Do not treat small training errors as proof of
+sub-degree validation accuracy.
+
 ## Scene changes already saved
 
 `Assets/Scenes/GavinsKitchen.unity` is wired for one camera per eye:
@@ -24,7 +52,7 @@ Keep Unity **6000.4.6f1**, as recorded in ProjectVersion.txt.
   compatibility with the existing overlay script.
 - The previous overlay component and its GazeDot are disabled. The progress
   canvas and Interactor stay enabled. New green/cyan/magenta dots show combined,
-  left and right gaze using the same target geometry. Their URP material is
+  left and right gaze using the same target geometry after the sequence. Their URP material is
   assigned, their colliders are disabled, and they hide on tracking loss.
 - Python and Unity must acknowledge matching geometry before calibration.
   Stale or invalid binocular data cannot drive gaze interaction.
@@ -97,7 +125,7 @@ send Jason's twelve-value CSV to the monocular reader.
 6. In that second terminal, start the bridge after the check finishes:
 
    ```text
-   python vr_bridge.py --stereo --stereo-file stereo_gaze.json --fov-x 24.866242 --fov-y 24.864738 --target-distance 2 --ipd-mm 64 --sample-window 2 --min-confidence 0 --session-note "binocular run 1"
+   python vr_bridge.py --stereo --stereo-file stereo_gaze.json --stereo-fit nine-point --fov-x 24.866242 --fov-y 24.864738 --target-distance 2 --ipd-mm 64 --sample-window 2 --min-confidence 0 --session-note "binocular run 1"
    ```
 
    Use the same actual IPD as Unity. Add `--unity-ip` only if Unity is on
@@ -109,7 +137,8 @@ send Jason's twelve-value CSV to the monocular reader.
    or use the existing calibration start button. Complete a fresh **9+8** run.
    At each target, look with both eyes, press the usual right-controller
    confirmation trigger, and keep fixation until the target moves. Look at
-   the target, not the gaze dots. No green dot before FIT is expected.
+   the target. Gaze feedback dots stay hidden during the sequence and return
+   afterwards when the calibrated stream is valid.
    Use V only to validate the current binocular model without refitting.
 8. Read `validation_stereo_<timestamp>.json` in the calibration folder; the
    latest copy is `validation_stereo_report.json`.
